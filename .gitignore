@@ -2,7 +2,7 @@
 /lib
 /stampino.*
 /demo/demo.*
-/test
+build
 /logs
 /benchmarks/*.d.ts
 /benchmarks/*.js

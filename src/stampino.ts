@@ -1,11 +1,11 @@
-import {render as renderLit, Template, nothing} from 'lit-html';
+import {render as renderLit, nothing} from 'lit-html';
 import {CompiledTemplate, CompiledTemplateResult} from 'lit-html';
 
 import {parse, Parser, EvalAstFactory} from 'jexpr';
 import type {Expression, Scope} from 'jexpr/lib/eval';
 
-import {_Σ} from 'lit-html/private-ssr-support.js';
-const {AttributePart, PropertyPart, BooleanAttributePart, EventPart} = _Σ;
+import {_$LH, Template} from 'lit-html/private-ssr-support.js';
+const {AttributePart, PropertyPart, BooleanAttributePart, EventPart} = _$LH;
 
 const astFactory = new EvalAstFactory();
 const expressionCache = new Map<string, Expression | undefined>();
@@ -283,7 +283,7 @@ export const getLitTemplate = (
 
 const makeLitTemplate = (template: HTMLTemplateElement): StampinoTemplate => {
   const litTemplate: StampinoTemplate = {
-    h: (undefined as unknown) as TrustedHTML,
+    h: undefined as unknown as TrustedHTML,
     el: template.cloneNode(true) as HTMLTemplateElement,
     parts: [],
     renderers: {},
