@@ -5,4 +5,5 @@ export default {
       timeout: '2000',
     },
   },
+  plugins: []
 };
