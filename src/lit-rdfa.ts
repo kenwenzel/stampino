@@ -17,15 +17,15 @@ export function rdfa(strings: TemplateStringsArray, ...values: unknown[]): Templ
     };
 }
 
-export function toHtml(template: TemplateResult<any>) {
+export function toHtml(template: TemplateResult<any>, newValues: Array<any> = []) {
     const newStrings = new Array<string>();
     // required dummy to make getTemplateHtml work
     (newStrings as any).raw = [""]
-    expandTemplates(template, newStrings)
+    expandTemplates(template, newStrings, newValues)
     return getTemplateHtml(newStrings as any as TemplateStringsArray, 1)
 }
 
-function expandTemplates(template: TemplateResult<any>, newStrings: Array<string>) {
+function expandTemplates(template: TemplateResult<any>, newStrings: Array<string>, newValues: Array<any>) {
     var appendNext = false
     for (var i = 0; i < template.strings.length; i++) {
         const str = template.strings[i]
@@ -41,8 +41,10 @@ function expandTemplates(template: TemplateResult<any>, newStrings: Array<string
         if (i < template.values.length) {
             const value: any = template.values[i]
             if (value.hasOwnProperty('_$litType$')) {
-                expandTemplates(value as TemplateResult, newStrings)
+                expandTemplates(value as TemplateResult, newStrings, newValues)
                 appendNext = true
+            } else {
+                newValues.push(value)
             }
         }
     }
@@ -100,7 +102,9 @@ export type TemplateHandler = (
     template: Element,
     model: object,
     handlers: TemplateHandlers,
-    renderers: Renderers
+    renderers: Renderers,
+    values?: Array<unknown>,
+    valueIndex?: number
 ) => unknown;
 
 export interface TemplateHandlers {
@@ -111,7 +115,9 @@ export const ifHandler: TemplateHandler = (
     template: Element,
     model: object,
     handlers: TemplateHandlers,
-    renderers: Renderers
+    renderers: Renderers,
+    values: Array<unknown> = [],
+    valueIndex: number = -1
 ) => {
     const ifAttribute = template.getAttribute('if');
     if (ifAttribute !== null && getSingleValue(ifAttribute, model)) {
@@ -131,7 +137,12 @@ const groupBy = function <E>(array: E[], keyFunc: (e: E) => string | undefined):
     return array.reduce((grouped, x) => {
         const key = keyFunc(x);
         if (key !== undefined) {
-            (grouped[key] = grouped[key] || []).push(x);
+            let list = grouped.get(key)
+            if (!list) {
+                list = []
+                grouped.set(key, list)
+            }
+            list?.push(x)
         }
         return grouped;
     }, new Map<string, E[]>());
@@ -150,10 +161,10 @@ const findTemplateVars = (template: Element): Map<string, BindingInfo> => {
             // this is an attribute that needs a binding
             const optional = value.startsWith("??") || value?.startsWith("?$")
             const varName = value.replace(/^[?]?[?$]/, "")
-            const bindingInfo: BindingInfo = prev[varName] || { attributes: [] }
+            const bindingInfo: BindingInfo = prev.get(varName) || { optional: false, attributes: [] }
             bindingInfo.optional = optional
             bindingInfo.attributes.push(name)
-            prev[varName] = bindingInfo
+            prev.set(varName, bindingInfo)
         }
         return prev
     }, new Map<string, BindingInfo>());
@@ -164,7 +175,9 @@ const bindHandler: TemplateHandler = (
     template: Element,
     model: object,
     handlers: TemplateHandlers,
-    renderers: Renderers
+    renderers: Renderers,
+    values: Array<unknown> = [],
+    valueIndex: number = -1
 ) => {
     const templateVars = findTemplateVars(template)
     // group results by binding combinations
@@ -172,7 +185,7 @@ const bindHandler: TemplateHandler = (
     //   "s": { "type": "uri" , "value": "http://example.org/someThing" } ,
     //   "label": { "type": "literal" , "value": "Thing 1" }
     // }
-    const groupedBindings = groupBy(model['bindings'] as object[], (e: object) => {
+    const groupedBindings = groupBy(model['bindings'] as object[] || [], (e: object) => {
         let key = ""
         for (const [varName, bindingInfo] of templateVars) {
             const value = e[varName]
@@ -180,12 +193,13 @@ const bindHandler: TemplateHandler = (
                 // do not add to a group if required binding is missing
                 return undefined
             }
+            console.log("stringify", value)
             key += JSON.stringify(value)
         }
         return key
     })
 
-    const litTemplate = getLitTemplate(template);
+    const litTemplate = getLitTemplate(template, values, valueIndex);
 
     let index = -1;
     const result = [];
@@ -205,14 +219,16 @@ const bindHandler: TemplateHandler = (
         };
         result.push(templateResult);
     }
-    return result;
+    return result.length > 0 ? result : nothing;
 };
 
 export const repeatHandler: TemplateHandler = (
     template: Element,
     model: object,
     handlers: TemplateHandlers,
-    renderers: Renderers
+    renderers: Renderers,
+    values: Array<unknown> = [],
+    valueIndex: number = -1
 ) => {
     const repeatAttribute = template.getAttribute('repeat');
     if (repeatAttribute !== null) {
@@ -220,7 +236,7 @@ export const repeatHandler: TemplateHandler = (
         if (!items[Symbol.iterator]) {
             return nothing;
         }
-        const litTemplate = getLitTemplate(template);
+        const litTemplate = getLitTemplate(template, values, valueIndex);
 
         let index = -1;
         const result = [];
@@ -255,13 +271,15 @@ export const defaultHandlers = <TemplateHandlers>{
  */
 export const prepareTemplate = (
     template: HTMLTemplateElement,
+    values: Array<unknown> = [],
     handlers: TemplateHandlers = defaultHandlers,
     renderers: Renderers = {},
     superTemplate?: HTMLTemplateElement
 ): TemplateFunction => {
-    const litTemplate = getLitTemplate(template);
+    const litTemplate = getLitTemplate(template, values, -1);
     const templateRenderers = litTemplate.renderers;
     if (superTemplate) {
+        // TODO how to combine values and super template?
         const superLitTemplate = getLitTemplate(superTemplate);
         const superRenderers = superLitTemplate.renderers;
         const superCallRenderer = templateRenderers['super'];
@@ -347,7 +365,7 @@ export const render = (
     model: any,
     handlers: TemplateHandlers = defaultHandlers
 ) => {
-    const litTemplate = prepareTemplate(template, handlers);
+    const litTemplate = prepareTemplate(template, [], handlers);
     renderLit(litTemplate(model), container);
 };
 
@@ -364,21 +382,23 @@ export const evaluateTemplate = (
     template: Element,
     model: any,
     handlers: TemplateHandlers = defaultHandlers,
-    renderers: Renderers = {}
+    renderers: Renderers = {},
+    values: Array<unknown> = [],
+    valueIndex: number = -1
 ) => {
-    const litTemplate = getLitTemplate(template);
-    const values: Array<unknown> = [];
+    const litTemplate = getLitTemplate(template, values, valueIndex);
+    const resultValues: Array<unknown> = [];
     for (const part of litTemplate.parts) {
         const value = part.update(model, handlers, renderers);
         if (part.type === 1) {
-            values.push(...(value as Iterable<unknown>));
+            resultValues.push(...(value as Iterable<unknown>));
         } else {
-            values.push(value);
+            resultValues.push(value);
         }
     }
     const templateResult: CompiledTemplateResult = {
         _$litType$: litTemplate,
-        values,
+        values: resultValues,
     };
     return templateResult;
 };
@@ -403,11 +423,13 @@ interface StampinoTemplate extends CompiledTemplate {
 const litTemplateCache = new Map<Element, StampinoTemplate>();
 
 export const getLitTemplate = (
-    template: Element
+    template: Element,
+    values: Array<unknown> = [],
+    valueIndex: number = -1
 ): StampinoTemplate => {
     let litTemplate = litTemplateCache.get(template);
     if (litTemplate === undefined) {
-        litTemplateCache.set(template, (litTemplate = makeLitTemplate(template)));
+        litTemplateCache.set(template, (litTemplate = makeLitTemplate(template, values, valueIndex)));
     }
     return litTemplate;
 };
@@ -417,16 +439,26 @@ const createAttributeBinder = (attributeName: string, value: string): PartUpdate
     const optional = value.startsWith("??") || value?.startsWith("?$")
     const varName = value.replace(/^[?]?[?$]/, "")
     return (model: object, _handlers: TemplateHandlers, _renderers: Renderers) => {
-        return model['bindings']![varName].value
+        console.log("value", model['bindings']?.[0]?.[varName]?.value)
+        return model['bindings']?.[0]?.[varName]?.value
     }
 }
 
-const makeLitTemplate = (template: Element, values: Array<unknown> = []): StampinoTemplate => {
-    var valueIndex = 0
-
+const makeLitTemplate = (
+    template: Element,
+    values: Array<unknown> = [],
+    valueIndex: number = -1
+): StampinoTemplate => {
+    var templateElement = template.cloneNode(true) as Element
+    if (templateElement.tagName != "TEMPLATE") {
+        // wrap element in template tag
+        const wrapper = document.createElement("template") as HTMLTemplateElement
+        wrapper.content.appendChild(templateElement)
+        templateElement = wrapper
+    }
     const litTemplate: StampinoTemplate = {
         h: undefined as unknown as TrustedHTML,
-        el: template.cloneNode(true) as HTMLTemplateElement,
+        el: templateElement as HTMLTemplateElement,
         parts: [],
         renderers: {},
     };
@@ -443,23 +475,41 @@ const makeLitTemplate = (template: Element, values: Array<unknown> = []): Stampi
             nodeIndex++;
             const element = node as Element;
             const attributeNames = element.getAttributeNames();
-            if (attributeNames.find(name => {
-                const value = element.getAttribute(name)
-                return value?.startsWith("?") || value?.startsWith("$")
+            let ignoreHandler = !!element.getAttribute("ignoreHandler")
+            if (ignoreHandler) {
+                element.removeAttribute("ignoreHandler")
+            }
+
+            if (!ignoreHandler && attributeNames.find(name => {
+                if (name.endsWith("$lit$")) {
+                    // ignore attributes bound by expressions
+                    return false
+                } else {
+                    const value = element.getAttribute(name)
+                    return value?.startsWith("?") || value?.startsWith("$")
+                }
             }) !== undefined) {
+                //element.parentNode!.insertBefore(document.createComment(''), element);
+                //elementsToRemove.push(element);
+                // ensure that bind handler is not created in next recursive invocation
+                element.setAttribute("ignoreHandler", "true")
+
                 // this node requires bindings
-                let update = (
-                    model: object,
-                    handlers: TemplateHandlers,
-                    renderers: Renderers
-                ) => {
+                let update = (model: object, handlers: TemplateHandlers, renderers: Renderers) => {
                     return bindHandler(
                         element as HTMLElement,
                         model,
                         handlers,
-                        renderers
+                        renderers,
+                        values,
+                        valueIndex
                     );
                 };
+                litTemplate.parts.push({
+                    type: 2, // text binding
+                    index: nodeIndex,
+                    update,
+                });
             } else if (element.tagName === 'TEMPLATE') {
                 const type = element.getAttribute('type');
                 const name = element.getAttribute('name');
@@ -480,7 +530,9 @@ const makeLitTemplate = (template: Element, values: Array<unknown> = []): Stampi
                                 element as HTMLTemplateElement,
                                 model,
                                 handlers,
-                                renderers
+                                renderers,
+                                values,
+                                valueIndex
                             );
                         };
                     } else {
@@ -547,9 +599,9 @@ const makeLitTemplate = (template: Element, values: Array<unknown> = []): Stampi
                     let name = attributeName;
                     if (attributeName.endsWith("$lit$")) {
                         // this attribute has a lit marker and an associated value
-                        name = attributeName.replace(/[$]lit[$].*$/, "")
-                        let value = values[valueIndex++]
-                        strings = []
+                        name = attributeName.replace(/[$]lit[$]$/, "")
+                        let value = values[++valueIndex]
+                        strings = ['', '']
                         update = (model: object, _handlers: TemplateHandlers, _renderers: Renderers) => {
                             return value
                         }
@@ -557,7 +609,7 @@ const makeLitTemplate = (template: Element, values: Array<unknown> = []): Stampi
                         const attributeValue = element.getAttribute(attributeName)!;
 
                         if (attributeValue.startsWith("?")) {
-                            strings = []
+                            strings = ['', '']
                             update = createAttributeBinder(attributeName, attributeValue)
                         } else {
                             // TODO: use alternative to negative lookbehind
@@ -627,8 +679,7 @@ const makeLitTemplate = (template: Element, values: Array<unknown> = []): Stampi
                 litTemplate.parts.push({
                     type: 2,
                     index: ++nodeIndex,
-                    update: (model: unknown, _handlers: TemplateHandlers) =>
-                        expr.evaluate(model as Scope),
+                    update: (model: unknown, _handlers: TemplateHandlers) => expr.evaluate(model as Scope),
                 });
                 const newTextNode = new Text(strings[i + 1].replace('\\{{', '{{'));
                 textNode.parentNode!.insertBefore(newTextNode, textNode.nextSibling);
