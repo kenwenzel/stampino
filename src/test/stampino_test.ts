@@ -1,6 +1,6 @@
 import {assert} from '@esm-bundle/chai';
 import {render as litRender} from 'lit-html';
-import {prepareTemplate, render} from '../stampino.js';
+import {prepareTemplate, render} from '../lit-rdfa.js';
 
 suite('stampino', () => {
   let container: HTMLDivElement;

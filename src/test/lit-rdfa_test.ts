@@ -11,7 +11,8 @@ suite('lit-rdfa', () => {
 
   test('Basic', () => {
     const template = rdfa`<div prefix="dc: http://purl.org/dc/elements/1.1/">
-        ${rdfa`<p>This photo was taken by <span class=${"author"} about="photo1.jpg" property="dc:creator" content="?creator"></span>.</p>`}
+        ${html`Test`} {{ 2 + 3 }} ${html`<b>bold</b>`}
+        <p>This photo was taken by <span class="one ${"two"} three ${"four"} five" bla="a {{ true }} b {{ false }}" about="photo1.jpg" property="dc:creator" content="?creator"></span>.</p>
     </div>`
     const values: Array<any> = []
     const templateHtml = toHtml(template, values)
@@ -21,18 +22,20 @@ suite('lit-rdfa', () => {
     const p = new RDFaToSparqlParser(el.content.firstElementChild || document.createElement("div"), 'http://example.org/')
     const quads = p.resultQuads
 
-    console.log(templateHtml[0])
-    console.log("values", values)
+    console.log(el.content)
+    // console.log("values", values)
 
-    const litTemplate = prepareTemplate(el, values);
-    const model = {
+    const litTemplate = prepareTemplate(el);
+    let model = {
+      values : values,
       bindings: [{ "creator": { value: "some creator" } }]
     }
     renderLit(litTemplate(model), container);
-
     console.log("result", container)
 
-    //const result = html`<p a=${1} ?b=${true}>${1}</p>`
-    //console.log(toHtml(result))
+    model.bindings.push({ "creator": { value: "some other" } });
+
+    renderLit(litTemplate(model), container);
+    console.log("result", container)
   });
 });

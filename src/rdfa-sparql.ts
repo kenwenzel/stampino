@@ -1,18 +1,12 @@
 import {RDFaParser} from './rdfa';
 import {
   NamedNode,
-  BlankNode,
   Literal,
   Variable,
-  DefaultGraph,
   Term,
   Quad,
-  Quad_Graph,
   Quad_Object,
-  Quad_Predicate,
   Quad_Subject,
-  DataFactory,
-  BaseQuad,
 } from '@rdfjs/types';
 import * as rdf from './rdf';
 
